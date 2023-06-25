@@ -60,6 +60,7 @@ class GeneralizedRCNNTransform(nn.Module):
     def __init__(self, min_size, max_size, image_mean, image_std):
         super(GeneralizedRCNNTransform, self).__init__()
         if not isinstance(min_size, (list, tuple)):
+            # min_size如果不是list或tuple类型，就转成tuple类型
             min_size = (min_size,)
         self.min_size = min_size      # 指定图像的最小边长范围
         self.max_size = max_size      # 指定图像的最大边长范围
@@ -84,6 +85,8 @@ class GeneralizedRCNNTransform(nn.Module):
         index = int(torch.empty(1).uniform_(0., float(len(k))).item())
         return k[index]
 
+
+    # 对图片进行resize操作，resize到指定范围的最大宽高上，防止图片尺寸过大造成显卡爆炸
     def resize(self, image, target):
         # type: (Tensor, Optional[Dict[str, Tensor]]) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]
         """
@@ -234,6 +237,8 @@ class GeneralizedRCNNTransform(nn.Module):
                 targets=None  # type: Optional[List[Dict[str, Tensor]]]
                 ):
         # type: (...) -> Tuple[ImageList, Optional[List[Dict[str, Tensor]]]]
+
+        # 首先遍历batch内每一张图片，对每张图片减均值，除方差处理
         images = [img for img in images]
         for i in range(len(images)):
             image = images[i]

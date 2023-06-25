@@ -254,7 +254,8 @@ class FasterRCNN(FasterRCNNBase):
                  rpn_post_nms_top_n_train=2000, rpn_post_nms_top_n_test=1000,  # rpn中在nms处理后保留的proposal数
                  rpn_nms_thresh=0.7,  # rpn中进行nms处理时使用的iou阈值
                  rpn_fg_iou_thresh=0.7, rpn_bg_iou_thresh=0.3,  # rpn计算损失时，采集正负样本设置的阈值
-                 rpn_batch_size_per_image=256, rpn_positive_fraction=0.5,  # rpn计算损失时采样的样本数，以及正样本占总样本的比例
+                 rpn_batch_size_per_image=256, #每一张图片采样的样本的个数
+                 rpn_positive_fraction=0.5,  # rpn计算损失时采样的样本数，以及正样本占总样本的比例
                  rpn_score_thresh=0.0,
                  # Box parameters
                  box_roi_pool=None, box_head=None, box_predictor=None,
@@ -308,8 +309,11 @@ class FasterRCNN(FasterRCNNBase):
         rpn = RegionProposalNetwork(
             rpn_anchor_generator, rpn_head,
             rpn_fg_iou_thresh, rpn_bg_iou_thresh,
-            rpn_batch_size_per_image, rpn_positive_fraction,
-            rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh,
+            rpn_batch_size_per_image,
+            rpn_positive_fraction, # rpn计算损失时，采集正负样本设置的阈值
+            rpn_pre_nms_top_n, # 进行NMS之前，针对每一个预测特征层保留的目标个数
+            rpn_post_nms_top_n, # 进行NMS之后，剩余的目标个数，也就是RPN输出的propoal个数
+            rpn_nms_thresh, # NMS处理时，指定的阈值
             score_thresh=rpn_score_thresh)
 
         #  Multi-scale RoIAlign pooling
