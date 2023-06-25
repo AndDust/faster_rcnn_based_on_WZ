@@ -48,6 +48,7 @@ class AnchorsGenerator(nn.Module):
         aspect_ratios (Tuple[Tuple[float]]):
     """
 
+    # sizes是对应anchor的scale,aspect_rations是采用的不同的比例
     def __init__(self, sizes=(128, 256, 512), aspect_ratios=(0.5, 1.0, 2.0)):
         super(AnchorsGenerator, self).__init__()
 
@@ -62,6 +63,7 @@ class AnchorsGenerator(nn.Module):
         self.sizes = sizes
         self.aspect_ratios = aspect_ratios
         self.cell_anchors = None
+        # 会把原图上生成的所有anchor的信息放到这个字典中
         self._cache = {}
 
     def generate_anchors(self, scales, aspect_ratios, dtype=torch.float32, device=torch.device("cpu")):
@@ -74,6 +76,9 @@ class AnchorsGenerator(nn.Module):
             dtype: float32
             device: cpu/gpu
         """
+
+        # scales: tensor([32.], device='cuda:0')
+        # aspect_ratios: tensor([0.5000, 1.0000, 2.0000], device='cuda:0')
         scales = torch.as_tensor(scales, dtype=dtype, device=device)
         aspect_ratios = torch.as_tensor(aspect_ratios, dtype=dtype, device=device)
         h_ratios = torch.sqrt(aspect_ratios)
@@ -102,9 +107,13 @@ class AnchorsGenerator(nn.Module):
 
         # 根据提供的sizes和aspect_ratios生成anchors模板
         # anchors模板都是以(0, 0)为中心的anchor
+
+        # 有几个预测特征层，就会对应生成几个anchors模板
         cell_anchors = [
             self.generate_anchors(sizes, aspect_ratios, dtype, device)
             for sizes, aspect_ratios in zip(self.sizes, self.aspect_ratios)
+            # self.sizes: ((32,), (64,), (128,), (256,), (512,))
+            # self.aspect_ratios : ((0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0))
         ]
         self.cell_anchors = cell_anchors
 
@@ -169,6 +178,15 @@ class AnchorsGenerator(nn.Module):
         self._cache[key] = anchors
         return anchors
 
+    """
+       feature_maps: 
+            feature_maps[0].shape: torch.Size([8, 256, 200, 320])
+            feature_maps[1].shape: torch.Size([8, 256, 100, 160])
+            feature_maps[2].shape: torch.Size([8, 256, 50, 80])
+            feature_maps[3].shape: torch.Size([8, 256, 25, 40])
+            feature_maps[4].shape: torch.Size([8, 256, 13, 20])
+    """
+
     def forward(self, image_list, feature_maps):
         # type: (ImageList, List[Tensor]) -> List[Tensor]
         # 获取每个预测特征层的尺寸(height, width)
@@ -200,45 +218,57 @@ class AnchorsGenerator(nn.Module):
             for anchors_per_feature_map in anchors_over_all_feature_maps:
                 anchors_in_image.append(anchors_per_feature_map)
             anchors.append(anchors_in_image)
-        # 将每一张图像的所有预测特征层的anchors坐标信息拼接在一起
+        # 每一张图像的所有预测特征层的anchors坐标信息拼接在一起将
         # anchors是个list，每个元素为一张图像的所有anchors信息
         anchors = [torch.cat(anchors_per_image) for anchors_per_image in anchors]
         # Clear the cache in case that memory leaks.
         self._cache.clear()
         return anchors
 
-
-class RPNHead(nn.Module):
     """
     add a RPN head with classification and regression
     通过滑动窗口计算预测目标概率与bbox regression参数
 
     Arguments:
-        in_channels: number of channels of the input feature
-        num_anchors: number of anchors to be predicted
+        in_channels: 输入特征矩阵的channel
+        num_anchors: number of anchors to be predicted 特征图每个位置上anchor的个数，这里是15个anchor
     """
-
+class RPNHead(nn.Module):
     def __init__(self, in_channels, num_anchors):
         super(RPNHead, self).__init__()
         # 3x3 滑动窗口
         self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
-        # 计算预测的目标分数（这里的目标只是指前景或者背景）
+        """计算预测的目标分数（这里的目标只是指前景或者背景） 原本卷积核个数应该是2k个， 但是官方实现这里是k(k=15)个"""
         self.cls_logits = nn.Conv2d(in_channels, num_anchors, kernel_size=1, stride=1)
         # 计算预测的目标bbox regression参数
         self.bbox_pred = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=1, stride=1)
 
+        #  对上面三个卷积层进行参数的初始化
         for layer in self.children():
             if isinstance(layer, nn.Conv2d):
                 torch.nn.init.normal_(layer.weight, std=0.01)
                 torch.nn.init.constant_(layer.bias, 0)
 
+
+    """
+       x对应的是backbone输出的预测特征层（RPN输出）
+       对于Faster RCNN原论文只使用了一个预测特征层，但是train_resnet50_fpn是在多个预测特征层进行预测的，在不同层分别生成相应的目标分数和边界框回归参数
+    """
     def forward(self, x):
         # type: (List[Tensor]) -> Tuple[List[Tensor], List[Tensor]]
         logits = []
         bbox_reg = []
+        """
+        首先遍历预测特征层
+        """
+        # 这里backbone输出4个预测特征层，针对每个预测特征层分别去进行预测
         for i, feature in enumerate(x):
+            # 得到输出特征矩阵
             t = F.relu(self.conv(feature))
+            # 将输出特征矩阵分别送入目标分数预测器以及边界框预测器
+            """ logits[0].shape : torch.Size([8, 15, 25, 40]) """
             logits.append(self.cls_logits(t))
+            """ bbox_reg[0].shape : torch.Size([8, 60, 25, 40]) """
             bbox_reg.append(self.bbox_pred(t))
         return logits, bbox_reg
 

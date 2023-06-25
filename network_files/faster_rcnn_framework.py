@@ -79,6 +79,7 @@ class FasterRCNNBase(nn.Module):
             original_image_sizes.append((val[0], val[1]))
         # original_image_sizes = [img.shape[-2:] for img in images]
 
+        """【对图像进行预处理】"""
         images, targets = self.transform(images, targets)  # 对图像进行预处理
 
         # print(images.tensors.shape)
@@ -163,24 +164,28 @@ class FastRCNNPredictor(nn.Module):
 
         return scores, bbox_deltas
 
-
-class FasterRCNN(FasterRCNNBase):
-    """
+"""
     Implements Faster R-CNN.
 
     The input to the model is expected to be a list of tensors, each of shape [C, H, W], one for each
     image, and should be in 0-1 range. Different images can have different sizes.
 
     The behavior of the model changes depending if it is in training or evaluation mode.
+    模型的输入预计是张量的列表，每个张量的形状为[C，H，W]，每个张量一个 图像，应该在0-1范围内。不同的图像可以有不同的大小
+    模型的行为会发生变化，这取决于它是处于训练模式还是评估模式。
 
     During training, the model expects both the input tensors, as well as a targets (list of dictionary),
     containing:
         - boxes (FloatTensor[N, 4]): the ground-truth boxes in [x1, y1, x2, y2] format, with values
           between 0 and H and 0 and W
         - labels (Int64Tensor[N]): the class label for each ground-truth box
+    在训练过程中，模型期望输入张量和目标（字典列表）。包含：
+        -boxes（FloatTensor[N，4]）：[x1，y1，x2，y2]格式的GT框，介于0和H以及0和W之间
+        -labels（Int64Tensor[N]）：每个GT框的类标签
 
     The model returns a Dict[Tensor] during training, containing the classification and regression
     losses for both the RPN and the R-CNN.
+    该模型在训练期间返回Dict[Tensor]，包含RPN和R-CNN的分类和回归损失。
 
     During inference, the model requires only the input tensors, and returns the post-processed
     predictions as a List[Dict[Tensor]], one for each input image. The fields of the Dict are as
@@ -189,61 +194,116 @@ class FasterRCNN(FasterRCNNBase):
           0 and H and 0 and W
         - labels (Int64Tensor[N]): the predicted labels for each image
         - scores (Tensor[N]): the scores or each prediction
+        
+    在推理过程中，模型只需要输入张量，并返回经过后处理的“预测为列表[Dict[Tensor]]，每个输入图像一个。Dict的字段如下“如下所示：
+        - boxes（FloatTensor[N，4]）：[x1，y1，x2，y2]格式的预测框，值介于0和H以及0和W
+        - labels（Int64Tensor[N]）：每个图像的预测标签
+        - scores（Tensor[N]）：每个预测的分数
+        
 
     Arguments:
         backbone (nn.Module): the network used to compute the features for the model.
             It should contain a out_channels attribute, which indicates the number of output
             channels that each feature map has (and it should be the same for all feature maps).
             The backbone should return a single Tensor or and OrderedDict[Tensor].
+            用于计算模型特征的网络。它应该包含out_channels属性，该属性是每个特征图都有的通道数（所有功能图通道数都应该相同）。
+            骨干网应该返回单个Tensor 或着 OrderedDict[Tensor]。
+            
         num_classes (int): number of output classes of the model (including the background).
             If box_predictor is specified, num_classes should be None.
+            模型的输出类的数量（包括背景）。如果指定了box_predictor，则num_classes应为None。
+            
         min_size (int): minimum size of the image to be rescaled before feeding it to the backbone
+            将图像送入骨干网之前要重新缩放的图像的最小尺寸
+            
         max_size (int): maximum size of the image to be rescaled before feeding it to the backbone
+            将图像送入骨干网之前要重新缩放的图像的最大尺寸
+            
         image_mean (Tuple[float, float, float]): mean values used for input normalization.
             They are generally the mean values of the dataset on which the backbone has been trained
             on
+            用于输入归一化的平均值。它们通常是训练骨干网的数据集的平均值。
         image_std (Tuple[float, float, float]): std values used for input normalization.
             They are generally the std values of the dataset on which the backbone has been trained on
+            用于输入规范化的std值。”“它们通常是训练骨干网的数据集的标准值。
+            
         rpn_anchor_generator (AnchorGenerator): module that generates the anchors for a set of feature
             maps.
+            为一组特征图生成anchors的模块。
+            
         rpn_head (nn.Module): module that computes the objectness and regression deltas from the RPN
+            计算RPN模块的置信度和回归损失的模块
+            
         rpn_pre_nms_top_n_train (int): number of proposals to keep before applying NMS during training
+            在训练时，送入NMS之前要保留的建议框数量
+            
         rpn_pre_nms_top_n_test (int): number of proposals to keep before applying NMS during testing
+            在测试时，应用NMS之前要保留的建议数量
+            
         rpn_post_nms_top_n_train (int): number of proposals to keep after applying NMS during training
+        
         rpn_post_nms_top_n_test (int): number of proposals to keep after applying NMS during testing
+        
         rpn_nms_thresh (float): NMS threshold used for postprocessing the RPN proposals
+            用于后处理RPN输出的propisals的NMS阈值
+            
         rpn_fg_iou_thresh (float): minimum IoU between the anchor and the GT box so that they can be
             considered as positive during training of the RPN.
-        rpn_bg_iou_thresh (float): maximum IoU between the anchor and the GT box so that they can be
-            considered as negative during training of the RPN.
+            训练RPN时，正样本的最小IOU阈值
+            
+        rpn_bg_iou_thresh (float): 
+            训练RPN时，RPN负样本的最大IOU值
+            
         rpn_batch_size_per_image (int): number of anchors that are sampled during training of the RPN
             for computing the loss
+            训练RPN时，采样的用于计算损失的anchors的数量
+            
         rpn_positive_fraction (float): proportion of positive anchors in a mini-batch during training
             of the RPN
+            训练RPN时间，一个batch的正样本的比例
+            
         rpn_score_thresh (float): during inference, only return proposals with a classification score
             greater than rpn_score_thresh
+            在推理过程中，仅返回大于这个阈值的分类分数的建议框
+            
         box_roi_pool (MultiScaleRoIAlign): the module which crops and resizes the feature maps in
             the locations indicated by the bounding boxes
+            
+            
         box_head (nn.Module): module that takes the cropped feature maps as input
+        
         box_predictor (nn.Module): module that takes the output of box_head and returns the
             classification logits and box regression deltas.
+            
         box_score_thresh (float): during inference, only return proposals with a classification score
             greater than box_score_thresh
+            
         box_nms_thresh (float): NMS threshold for the prediction head. Used during inference
+        
         box_detections_per_img (int): maximum number of detections per image, for all classes.
+        
         box_fg_iou_thresh (float): minimum IoU between the proposals and the GT box so that they can be
             considered as positive during training of the classification head
+            训练Faster RCNN时，建议框与GT boxIOU的最小阈值，高于这个阈值认为是正样本的建议框
+            
         box_bg_iou_thresh (float): maximum IoU between the proposals and the GT box so that they can be
             considered as negative during training of the classification head
+            训练Faster RCNN时，建议框与GT boxIOU的最大阈值，低于这个阈值认为是负样本的建议框
+        
         box_batch_size_per_image (int): number of proposals that are sampled during training of the
             classification head
+            训练Faster RCNN分类头时，每张图片采样的建议框的数量
+            
         box_positive_fraction (float): proportion of positive proposals in a mini-batch during training
             of the classification head
+              训练Faster RCNN分类头时，采样的正样本建议框的数量
+              
         bbox_reg_weights (Tuple[float, float, float, float]): weights for the encoding/decoding of the
             bounding boxes
-
+            用于encoding/decoding边界框的权重
+            
     """
-
+class FasterRCNN(FasterRCNNBase):
     def __init__(self, backbone, num_classes=None,
                  # transform parameter
                  min_size=800, max_size=1333,      # 预处理resize时限制的最小尺寸与最大尺寸
@@ -299,12 +359,18 @@ class FasterRCNN(FasterRCNNBase):
                 out_channels, rpn_anchor_generator.num_anchors_per_location()[0]
             )
 
-        # 默认rpn_pre_nms_top_n_train = 2000, rpn_pre_nms_top_n_test = 1000,
-        # 默认rpn_post_nms_top_n_train = 2000, rpn_post_nms_top_n_test = 1000,
+        """
+            使用字典形式进行存储
+            # 默认rpn_pre_nms_top_n_train = 2000, rpn_pre_nms_top_n_test = 1000,
+            # 默认rpn_post_nms_top_n_train = 2000, rpn_post_nms_top_n_test = 1000,
+        """
         rpn_pre_nms_top_n = dict(training=rpn_pre_nms_top_n_train, testing=rpn_pre_nms_top_n_test)
         rpn_post_nms_top_n = dict(training=rpn_post_nms_top_n_train, testing=rpn_post_nms_top_n_test)
 
-        # 定义整个RPN框架
+        """
+            RPN部分
+            定义整个RPN框架
+        """
         rpn = RegionProposalNetwork(
             rpn_anchor_generator, rpn_head,
             rpn_fg_iou_thresh, rpn_bg_iou_thresh,
