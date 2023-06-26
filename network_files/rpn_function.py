@@ -252,6 +252,8 @@ class RPNHead(nn.Module):
 
     """
        x对应的是backbone输出的预测特征层（RPN输出）
+            x[0].shapetorch.Size([8, 1280, 25, 39])
+            
        对于Faster RCNN原论文只使用了一个预测特征层，但是train_resnet50_fpn是在多个预测特征层进行预测的，在不同层分别生成相应的目标分数和边界框回归参数
     """
     def forward(self, x):
@@ -311,6 +313,10 @@ def permute_and_flatten(layer, N, A, C, H, W):
     return layer
 
 
+"""
+    box_cls[0].shape : torch.Size([8, 15, 25, 38])
+    box_regression[0].shape : torch.Size([8, 60, 25, 38])
+"""
 def concat_box_prediction_layers(box_cls, box_regression):
     # type: (List[Tensor], List[Tensor]) -> Tuple[Tensor, Tensor]
     """
@@ -330,9 +336,7 @@ def concat_box_prediction_layers(box_cls, box_regression):
         遍历每个预测特征层,对于train_mobilenetv2来说，只有一个预测特征层，所以只会循环一次
         box_cls[0].shape : torch.Size([8, 15, 25, 38])
         box_regression[0].shape : torch.Size([8, 60, 25, 38])
-    """
-
-    """ 
+        
         box_cls ,box_regression : 每个预测特征层的置信度和回归参数
         box_cls_per_level.shape : torch.Size([8, 15, 25, 38])
         box_regression_per_level.shape : torch.Size([8, 60, 25, 38])
@@ -350,20 +354,22 @@ def concat_box_prediction_layers(box_cls, box_regression):
 
         # [N, -1, C]
         """
+            为什么要转化成这种形式？
             box_cls_per_level.shape : torch.Size([8, 14250, 1])
         """
         box_cls_per_level = permute_and_flatten(box_cls_per_level, N, A, C, H, W)
         box_cls_flattened.append(box_cls_per_level)
 
         # [N, -1, C]
+        """
+                box_cls_flattened[0].shape : torch.Size([8, 14250, 1])
+                box_regression_flattened[0].shape : torch.Size([8, 14250, 4])
+        """
         box_regression_per_level = permute_and_flatten(box_regression_per_level, N, A, 4, H, W)
         box_regression_flattened.append(box_regression_per_level)
-    """
-        box_cls_flattened[0].shape : torch.Size([8, 14250, 1])
-        box_regression_flattened[0].shape : torch.Size([8, 14250, 4])
-    """
 
     """
+        为什么要转化成这种形式？
         box_cls.shape : torch.Size([120000, 1])
         box_regression.shape : torch.Size([120000, 4])
     """
@@ -391,7 +397,7 @@ class RegionProposalNetwork(torch.nn.Module):
             ： 在RPN计算中，被认为是背景anchor也就是负样本的阈值
         batch_size_per_image (int): number of anchors that are sampled during training of the RPN
             for computing the loss
-            ：训练RPN网络计算loss时，采样的anchors个数
+            ：训练RPN网络计算loss时，每张图片采样的正负样本anchors个数
         positive_fraction (float): proportion of positive anchors in a mini-batch during training
             of the RPN
             ：训练RPN网络时，一个mini-batch中，正样本的比例
@@ -445,6 +451,9 @@ class RegionProposalNetwork(torch.nn.Module):
         self._post_nms_top_n = post_nms_top_n
         self.nms_thresh = nms_thresh
         self.score_thresh = score_thresh
+        """
+            剔除小边框proposals时，长宽的阈值
+        """
         self.min_size = 1.
 
     def pre_nms_top_n(self):
@@ -629,20 +638,21 @@ class RegionProposalNetwork(torch.nn.Module):
             final_scores.append(scores)
         return final_boxes, final_scores
 
+    """
+    计算RPN损失，包括类别损失（前景与背景），bbox regression损失
+    Arguments:
+        objectness (Tensor)：预测的前景概率
+        pred_bbox_deltas (Tensor)：预测的bbox regression
+        labels (List[Tensor])：真实的标签 1, 0, -1（batch中每一张图片的labels对应List的一个元素中）
+        regression_targets (List[Tensor])：真实的bbox regression
+
+    Returns:
+        objectness_loss (Tensor) : 类别损失
+        box_loss (Tensor)：边界框回归损失
+    """
     def compute_loss(self, objectness, pred_bbox_deltas, labels, regression_targets):
         # type: (Tensor, Tensor, List[Tensor], List[Tensor]) -> Tuple[Tensor, Tensor]
-        """
-        计算RPN损失，包括类别损失（前景与背景），bbox regression损失
-        Arguments:
-            objectness (Tensor)：预测的前景概率
-            pred_bbox_deltas (Tensor)：预测的bbox regression
-            labels (List[Tensor])：真实的标签 1, 0, -1（batch中每一张图片的labels对应List的一个元素中）
-            regression_targets (List[Tensor])：真实的bbox regression
 
-        Returns:
-            objectness_loss (Tensor) : 类别损失
-            box_loss (Tensor)：边界框回归损失
-        """
         # 按照给定的batch_size_per_image, positive_fraction选择正负样本
         sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
         # 将一个batch中的所有正负样本List(Tensor)分别拼接在一起，并获取非零位置的索引
@@ -716,8 +726,8 @@ class RegionProposalNetwork(torch.nn.Module):
         # 计算每个预测特征层上的预测目标概率和bboxes regression参数
         # objectness和pred_bbox_deltas都是list
         """
-           计算每个预测特征层上每个anchors的预测目标概率和bboxes regression参数   
-           self.head : RPNHead
+            计算每个预测特征层上每个anchors的预测目标概率和bboxes regression参数   
+            self.head : RPNHead
            
             objectness[0].shape : torch.Size([8, 15, 25, 38])
             pred_bbox_deltas[0].shape : torch.Size([8, 60(15 * 4), 25, 38])
@@ -762,7 +772,6 @@ class RegionProposalNetwork(torch.nn.Module):
         # note that we detach the deltas because Faster R-CNN do not backprop through
         # the proposals
 
-        # 将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
         """
             将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
 
@@ -774,9 +783,11 @@ class RegionProposalNetwork(torch.nn.Module):
 
             proposals.shape : torch.Size([114000, 1, 4])
         """
-        
+
         proposals = self.box_coder.decode(pred_bbox_deltas.detach(), anchors)
-        
+        """
+            proposals.shape : torch.Size([8, 14250, 4])
+        """
         proposals = proposals.view(num_images, -1, 4)
 
         # 筛除小boxes框，nms处理，根据预测概率获取前post_nms_top_n个目标
@@ -797,7 +808,6 @@ class RegionProposalNetwork(torch.nn.Module):
             images.image_sizes : [(800, 1066), (800, 1201), (800, 1204), (800, 1066), (800, 1066), (800, 1066), (800, 1066), (800, 1066)]
             num_anchors_per_level : [14250]
         """
-
         boxes, scores = self.filter_proposals(proposals, objectness, images.image_sizes, num_anchors_per_level)
 
         losses = {}
