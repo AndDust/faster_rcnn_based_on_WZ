@@ -190,6 +190,14 @@ class BoxCoder(object):
 
         return targets
 
+
+    """ 
+        rel_codes:预测的边界框回归参数
+        boxes：得到的anchors
+        
+        rel_codes.shape : torch.Size([114000, 4])
+        boxes[0].shape : torch.Size([14250, 4])
+    """
     def decode(self, rel_codes, boxes):
         # type: (Tensor, List[Tensor]) -> Tensor
         """
@@ -203,7 +211,14 @@ class BoxCoder(object):
         """
         assert isinstance(boxes, (list, tuple))
         assert isinstance(rel_codes, torch.Tensor)
+
+        """
+            boxes_per_image : [14250, 14250, 14250, 14250, 14250, 14250, 14250, 14250]
+        """
         boxes_per_image = [b.size(0) for b in boxes]
+        """
+            concat_boxes.shape : torch.Size([114000, 4])
+        """
         concat_boxes = torch.cat(boxes, dim=0)
 
         box_sum = 0
@@ -211,6 +226,13 @@ class BoxCoder(object):
             box_sum += val
 
         # 将预测的bbox回归参数应用到对应anchors上得到预测bbox的坐标
+        """
+            rel_codes.shape : torch.Size([114000, 4])
+            concat_boxes.shape : torch.Size([114000, 4])
+        """
+        """
+            pred_boxes.shape : torch.Size([114000, 4])
+        """
         pred_boxes = self.decode_single(
             rel_codes, concat_boxes
         )

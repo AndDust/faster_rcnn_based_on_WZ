@@ -292,9 +292,21 @@ def permute_and_flatten(layer, N, A, C, H, W):
     # view函数只能用于内存中连续存储的tensor，permute等操作会使tensor在内存中变得不再连续，此时就不能再调用view函数
     # reshape则不需要依赖目标tensor是否在内存中是连续的
     # [batch_size, anchors_num_per_position * (C or 4), height, width]
+    """
+        原本：layer1.shape ： torch.Size([8, 15, 25, 38]) ————>
+        layer1.shape : torch.Size([8, 15, 1, 25, 38])
+    """
     layer = layer.view(N, -1, C,  H, W)
     # 调换tensor维度
+    """
+        layer1.shape : torch.Size([8, 25, 38, 15, 1])
+        layer2.shape : torch.Size([8, 25, 38, 15, 4])
+    """
     layer = layer.permute(0, 3, 4, 1, 2)  # [N, H, W, -1, C]
+    """ 
+        layer1.shape : torch.Size([8, 14250, 1])
+        layer2.shape : torch.Size([8, 14250, 4])
+    """
     layer = layer.reshape(N, -1, C)
     return layer
 
@@ -314,26 +326,47 @@ def concat_box_prediction_layers(box_cls, box_regression):
     box_cls_flattened = []
     box_regression_flattened = []
 
-    # 遍历每个预测特征层
+    """
+        遍历每个预测特征层,对于train_mobilenetv2来说，只有一个预测特征层，所以只会循环一次
+        box_cls[0].shape : torch.Size([8, 15, 25, 38])
+        box_regression[0].shape : torch.Size([8, 60, 25, 38])
+    """
+
+    """ 
+        box_cls ,box_regression : 每个预测特征层的置信度和回归参数
+        box_cls_per_level.shape : torch.Size([8, 15, 25, 38])
+        box_regression_per_level.shape : torch.Size([8, 60, 25, 38])
+    """
     for box_cls_per_level, box_regression_per_level in zip(box_cls, box_regression):
         # [batch_size, anchors_num_per_position * classes_num, height, width]
         # 注意，当计算RPN中的proposal时，classes_num=1,只区分目标和背景
         N, AxC, H, W = box_cls_per_level.shape
         # # [batch_size, anchors_num_per_position * 4, height, width]
         Ax4 = box_regression_per_level.shape[1]
-        # anchors_num_per_position
+        # anchors_num_per_position 特征图每个位置上anchor的个数
         A = Ax4 // 4
-        # classes_num
+        # classes_num 类别个数1
         C = AxC // A
 
         # [N, -1, C]
+        """
+            box_cls_per_level.shape : torch.Size([8, 14250, 1])
+        """
         box_cls_per_level = permute_and_flatten(box_cls_per_level, N, A, C, H, W)
         box_cls_flattened.append(box_cls_per_level)
 
         # [N, -1, C]
         box_regression_per_level = permute_and_flatten(box_regression_per_level, N, A, 4, H, W)
         box_regression_flattened.append(box_regression_per_level)
+    """
+        box_cls_flattened[0].shape : torch.Size([8, 14250, 1])
+        box_regression_flattened[0].shape : torch.Size([8, 14250, 4])
+    """
 
+    """
+        box_cls.shape : torch.Size([120000, 1])
+        box_regression.shape : torch.Size([120000, 4])
+    """
     box_cls = torch.cat(box_cls_flattened, dim=1).flatten(0, -2)  # start_dim, end_dim
     box_regression = torch.cat(box_regression_flattened, dim=1).reshape(-1, 4)
     return box_cls, box_regression
@@ -343,25 +376,35 @@ class RegionProposalNetwork(torch.nn.Module):
     """
     Implements Region Proposal Network (RPN).
 
+        faster rcnn 在proposal提出阶段使用nms，目的是希望把预测同一块区域的相互重叠比较严重的的proposal去除掉，只留下置信度较高的proposal；
+        在test阶段，对预测的box使用nms，同样是去除重叠。应该只有这两个地方使用了nms
+
     Arguments:
-        anchor_generator (AnchorGenerator): module that generates the anchors for a set of feature
-            maps.
+        anchor_generator (AnchorGenerator): 生成针对一系列feature maps对应anchors的module
         head (nn.Module): module that computes the objectness and regression deltas
+            ：计算置信度和回归参数的module
         fg_iou_thresh (float): minimum IoU between the anchor and the GT box so that they can be
             considered as positive during training of the RPN.
+            ：在RPN计算中，被认为是目标anchor也就是正样本的阈值
         bg_iou_thresh (float): maximum IoU between the anchor and the GT box so that they can be
             considered as negative during training of the RPN.
+            ： 在RPN计算中，被认为是背景anchor也就是负样本的阈值
         batch_size_per_image (int): number of anchors that are sampled during training of the RPN
             for computing the loss
+            ：训练RPN网络计算loss时，采样的anchors个数
         positive_fraction (float): proportion of positive anchors in a mini-batch during training
             of the RPN
+            ：训练RPN网络时，一个mini-batch中，正样本的比例
         pre_nms_top_n (Dict[str]): number of proposals to keep before applying NMS. It should
             contain two fields: training and testing, to allow for different values depending
             on training or evaluation
+            ：在送入NMS之前，proposal的个数
         post_nms_top_n (Dict[str]): number of proposals to keep after applying NMS. It should
             contain two fields: training and testing, to allow for different values depending
             on training or evaluation
+            ：送入NMS后，proposal的个数
         nms_thresh (float): NMS threshold used for postprocessing the RPN proposals
+            ：用于NMS后处理的阈值
 
     """
     __annotations__ = {
@@ -379,9 +422,11 @@ class RegionProposalNetwork(torch.nn.Module):
         super(RegionProposalNetwork, self).__init__()
         self.anchor_generator = anchor_generator
         self.head = head
+        """box_coder: 计算边界框的回归参数"""
         self.box_coder = det_utils.BoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
 
         # use during training
+
         # 计算anchors与真实bbox的iou
         self.box_similarity = box_ops.box_iou
 
@@ -494,6 +539,11 @@ class RegionProposalNetwork(torch.nn.Module):
 
     """
         根据建议框的尺寸筛除小boxes框，根据类别概率进行nms处理，根据预测概率获取前post_nms_top_n个目标
+        
+        proposals.shape : torch.Size([8, 14250, 4])
+        objectness.shape : torch.Size([114000, 1])
+        image_shapes : [(800, 1066), (800, 1066), (800, 1201), (800, 1066), (800, 1069), (800, 1201), (800, 1066), (800, 1066)]
+        num_anchors_per_level[0] : 14250
     """
     def filter_proposals(self, proposals, objectness, image_shapes, num_anchors_per_level):
         # type: (Tensor, Tensor, List[Tuple[int, int]], List[int]) -> Tuple[List[Tensor], List[Tensor]]
@@ -512,16 +562,29 @@ class RegionProposalNetwork(torch.nn.Module):
         device = proposals.device
 
         # do not backprop throught objectness
+
         objectness = objectness.detach()
+        """
+            objectness.shape : torch.Size([8, 14250])
+        """
         objectness = objectness.reshape(num_images, -1)
 
         # Returns a tensor of size size filled with fill_value
         # levels负责记录分隔不同预测特征层上的anchors索引信息
+        """
+            levels[0] : tensor([0, 0, 0,  ..., 0, 0, 0], device='cuda:0')
+            levels[0].shape : torch.Size([14250])
+        """
         levels = [torch.full((n, ), idx, dtype=torch.int64, device=device)
                   for idx, n in enumerate(num_anchors_per_level)]
         levels = torch.cat(levels, 0)
 
         # Expand this tensor to the same size as objectness
+        """
+            levels.shape : torch.Size([8, 14250])
+            levels.reshape(1, -1).shape : torch.Size([1, 14250])
+            objectness.shape : torch.Size([8, 14250])        
+        """
         levels = levels.reshape(1, -1).expand_as(objectness)
 
         # select top_n boxes independently per level before applying nms
@@ -610,6 +673,16 @@ class RegionProposalNetwork(torch.nn.Module):
 
         return objectness_loss, box_loss
 
+    """
+        RPN将20000多个候选的anchor选出256个anchor进行分类和回归位置。选择过程如下：
+        对于每一个ground truth bounding box（gt_bbox），选择和它重叠度（IoU）最高的一个anchor作为正样本。
+        对于剩下的anchor，从中选择和任意一个gt_bbox重叠度超过0.7的anchor，作为正样本，正样本的数目不超过128个。
+        随机选择和gt_bbox重叠度小于0.3的anchor作为负样本。
+        负样本和正样本的总数为256。
+        features.get('0').shape : torch.Size([8, 1280, 25, 38]) batch_szie, Channel, H, W
+        images.image_sizes : [(800, 1066), (800, 1066), (800, 1028), (800, 1201), (800, 1066), (800, 1066), (800, 1066), (800, 1066)]
+        images.tensors.shape: torch.Size([8, 3, 800, 1216])
+    """
     def forward(self,
                 images,        # type: ImageList
                 features,      # type: Dict[str, Tensor]
@@ -634,6 +707,10 @@ class RegionProposalNetwork(torch.nn.Module):
         """
         # RPN uses all feature maps that are available
         # features是所有预测特征层组成的OrderedDict
+        # python内置values()函数返回一个字典中所有值。
+        """
+            features[0].shape : torch.Size([8, 1280, 25, 38])
+        """
         features = list(features.values())
 
         # 计算每个预测特征层上的预测目标概率和bboxes regression参数
@@ -641,11 +718,17 @@ class RegionProposalNetwork(torch.nn.Module):
         """
            计算每个预测特征层上每个anchors的预测目标概率和bboxes regression参数   
            self.head : RPNHead
+           
+            objectness[0].shape : torch.Size([8, 15, 25, 38])
+            pred_bbox_deltas[0].shape : torch.Size([8, 60(15 * 4), 25, 38])
         """
         objectness, pred_bbox_deltas = self.head(features)
 
         # 生成一个batch图像的所有anchors信息,list(tensor)元素个数等于batch_size
         """
+            len(anchors) = 8
+            anchors[0].shape : torch.Size([14250, 4])
+            
             生成特征图每个点上anchors的坐标信息（xmin, ymin, xmax, ymax）
             anchors[0].shape : torch.Size([15000, 4])
             anchors[1].shape : torch.Size([15000, 4])
@@ -653,15 +736,25 @@ class RegionProposalNetwork(torch.nn.Module):
         """
         anchors = self.anchor_generator(images, features)
 
-        # batch_size
+        # batch_size 8张图片
         num_images = len(anchors)
 
         # numel() Returns the total number of elements in the input tensor.
         # 计算每个预测特征层上的对应的anchors数量
+        """
+            num_anchors_per_level_shape_tensors[0] : torch.Size([15, 25, 38])
+        """
         num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness]
+        """
+            num_anchors_per_level = 15 * 25 *38 = 14250，这是一个torch.size类型
+        """
         num_anchors_per_level = [s[0] * s[1] * s[2] for s in num_anchors_per_level_shape_tensors]
 
         # 调整内部tensor格式以及shape
+        """
+            objectness.shape : torch.Size([114000, 1])
+            pred_bbox_deltas.shape : torch.Size([114000, 4])
+        """
         objectness, pred_bbox_deltas = concat_box_prediction_layers(objectness,
                                                                     pred_bbox_deltas)
 
@@ -672,11 +765,39 @@ class RegionProposalNetwork(torch.nn.Module):
         # 将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
         """
             将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
+
+            proposals.shape : torch.Size([8, 14250, 4])
+            pred_bbox_deltas.shape : torch.Size([114000, 4])
+            
+            len(anchors) = 8
+            anchors[0].shape : torch.Size([14250, 4])
+
+            proposals.shape : torch.Size([114000, 1, 4])
         """
+        
         proposals = self.box_coder.decode(pred_bbox_deltas.detach(), anchors)
+        
         proposals = proposals.view(num_images, -1, 4)
 
         # 筛除小boxes框，nms处理，根据预测概率获取前post_nms_top_n个目标
+        """
+            boxes[0].shape : torch.Size([1312, 4])
+            boxes[1].shape : torch.Size([1294, 4])
+            boxes[2].shape : torch.Size([1347, 4])
+            boxes[3].shape : torch.Size([1310, 4])
+            ...
+            scores[0].shape : torch.Size([1312])
+            scores[1].shape : torch.Size([1294])
+            scores[2].shape : torch.Size([1347])
+            scores[4].shape : torch.Size([1284])
+            ...
+            
+            proposals.shape : torch.Size([8, 14250, 4])
+            objectness.shape : torch.Size([114000, 1])
+            images.image_sizes : [(800, 1066), (800, 1201), (800, 1204), (800, 1066), (800, 1066), (800, 1066), (800, 1066), (800, 1066)]
+            num_anchors_per_level : [14250]
+        """
+
         boxes, scores = self.filter_proposals(proposals, objectness, images.image_sizes, num_anchors_per_level)
 
         losses = {}
