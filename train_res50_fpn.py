@@ -189,7 +189,7 @@ if __name__ == "__main__":
         description=__doc__)
 
     # 训练设备类型
-    parser.add_argument('--device', default='cuda:1', help='device')
+    parser.add_argument('--device', default='cuda:0', help='device')
     # 训练数据集的根目录(VOCdevkit)
     parser.add_argument('--data-path', default='./VOC/', help='dataset')
     # 检测目标类别数(不包含背景)

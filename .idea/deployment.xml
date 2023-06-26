@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="nku524@46u6392w85.zicp.fun:29043 password" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="nku524@192.168.1.81:22" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="nku524@46u6392w85.zicp.fun:29043 password">
+      <paths name="nku524@192.168.1.81:22">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/nku524/dl/copycode/faster_rcnn" local="$PROJECT_DIR$" />
+            <mapping deploy="/home/nku524/dl/code" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>
