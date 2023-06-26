@@ -492,13 +492,16 @@ class RegionProposalNetwork(torch.nn.Module):
             offset += num_anchors
         return torch.cat(r, dim=1)
 
+    """
+        根据建议框的尺寸筛除小boxes框，根据类别概率进行nms处理，根据预测概率获取前post_nms_top_n个目标
+    """
     def filter_proposals(self, proposals, objectness, image_shapes, num_anchors_per_level):
         # type: (Tensor, Tensor, List[Tuple[int, int]], List[int]) -> Tuple[List[Tensor], List[Tensor]]
         """
         筛除小boxes框，nms处理，根据预测概率获取前post_nms_top_n个目标
         Args:
             proposals: 预测的bbox坐标
-            objectness: 预测的目标概率
+            objectness: 预测目标概率的
             image_shapes: batch中每张图片的size信息
             num_anchors_per_level: 每个预测特征层上预测anchors的数目
 
@@ -635,9 +638,19 @@ class RegionProposalNetwork(torch.nn.Module):
 
         # 计算每个预测特征层上的预测目标概率和bboxes regression参数
         # objectness和pred_bbox_deltas都是list
+        """
+           计算每个预测特征层上每个anchors的预测目标概率和bboxes regression参数   
+           self.head : RPNHead
+        """
         objectness, pred_bbox_deltas = self.head(features)
 
         # 生成一个batch图像的所有anchors信息,list(tensor)元素个数等于batch_size
+        """
+            生成特征图每个点上anchors的坐标信息（xmin, ymin, xmax, ymax）
+            anchors[0].shape : torch.Size([15000, 4])
+            anchors[1].shape : torch.Size([15000, 4])
+            ...
+        """
         anchors = self.anchor_generator(images, features)
 
         # batch_size
@@ -655,7 +668,11 @@ class RegionProposalNetwork(torch.nn.Module):
         # apply pred_bbox_deltas to anchors to obtain the decoded proposals
         # note that we detach the deltas because Faster R-CNN do not backprop through
         # the proposals
+
         # 将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
+        """
+            将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
+        """
         proposals = self.box_coder.decode(pred_bbox_deltas.detach(), anchors)
         proposals = proposals.view(num_images, -1, 4)
 

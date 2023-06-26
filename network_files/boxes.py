@@ -3,35 +3,37 @@ from typing import Tuple
 from torch import Tensor
 import torchvision
 
+"""
+Performs non-maximum suppression (NMS) on the boxes according
+to their intersection-over-union (IoU).
 
+NMS iteratively removes lower scoring boxes which have an
+IoU greater than iou_threshold with another (higher scoring)
+box.
+
+NMS迭代地移除具有大于IoU_threshold的IoU的较低得分框和另一个（较高得分）框。
+
+Parameters
+----------
+boxes : Tensor[N, 4])
+    boxes to perform NMS on. They
+    are expected to be in (x1, y1, x2, y2) format
+scores : Tensor[N]
+    scores for each one of the boxes
+iou_threshold : float
+    discards all overlapping
+    boxes with IoU > iou_threshold
+
+Returns
+-------
+keep : Tensor
+    int64 tensor with the indices
+    of the elements that have been kept
+    by NMS, sorted in decreasing order of scores
+"""
 def nms(boxes, scores, iou_threshold):
     # type: (Tensor, Tensor, float) -> Tensor
-    """
-    Performs non-maximum suppression (NMS) on the boxes according
-    to their intersection-over-union (IoU).
 
-    NMS iteratively removes lower scoring boxes which have an
-    IoU greater than iou_threshold with another (higher scoring)
-    box.
-
-    Parameters
-    ----------
-    boxes : Tensor[N, 4])
-        boxes to perform NMS on. They
-        are expected to be in (x1, y1, x2, y2) format
-    scores : Tensor[N]
-        scores for each one of the boxes
-    iou_threshold : float
-        discards all overlapping
-        boxes with IoU > iou_threshold
-
-    Returns
-    -------
-    keep : Tensor
-        int64 tensor with the indices
-        of the elements that have been kept
-        by NMS, sorted in decreasing order of scores
-    """
     return torch.ops.torchvision.nms(boxes, scores, iou_threshold)
 
 
@@ -82,10 +84,7 @@ def batched_nms(boxes, scores, idxs, iou_threshold):
     keep = nms(boxes_for_nms, scores, iou_threshold)
     return keep
 
-
-def remove_small_boxes(boxes, min_size):
-    # type: (Tensor, float) -> Tensor
-    """
+"""
     Remove boxes which contains at least one side smaller than min_size.
     移除宽高小于指定阈值的索引
     Arguments:
@@ -95,7 +94,9 @@ def remove_small_boxes(boxes, min_size):
     Returns:
         keep (Tensor[K]): indices of the boxes that have both sides
             larger than min_size
-    """
+"""
+def remove_small_boxes(boxes, min_size):
+    # type: (Tensor, float) -> Tensor
     ws, hs = boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1]  # 预测boxes的宽和高
     # keep = (ws >= min_size) & (hs >= min_size)  # 当满足宽，高都大于给定阈值时为True
     keep = torch.logical_and(torch.ge(ws, min_size), torch.ge(hs, min_size))
